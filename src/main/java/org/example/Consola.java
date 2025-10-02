@@ -5,6 +5,8 @@ import java.net.MalformedURLException;
 import java.rmi.Naming;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Scanner;
 
 /**
@@ -19,7 +21,7 @@ public class Consola {
 
     private final Scanner sc;
     private final ISensorRMI sensorTemperatura;
-    private final ISensorRMI sensorHumedad;
+    private final Map<Integer, ISensorRMI> sensoresHumedad = new HashMap<>();
     private final ISensorRMI sensorRadiacion;
     private final ISensorRMI sensorLluvia;
 
@@ -38,7 +40,16 @@ public class Consola {
 
         // Todos los sensores se conectan al mismo puerto pero con nombres de servicio diferentes.
         sensorTemperatura = conexionRMI("SensorTemperaturaRMI");
-        sensorHumedad     = conexionRMI("SensorHumedadRMI");
+
+        // Conectar a los 5 sensores de humedad (IDs 0 a 4)
+        for (int i = 0; i < 5; i++) {
+            String serviceName = "SensorHumedadRMI" + i;
+            ISensorRMI sensor = conexionRMI(serviceName);
+            if (sensor != null) {
+                sensoresHumedad.put(i, sensor);
+            }
+        }
+
         sensorRadiacion   = conexionRMI("SensorRadiacionRMI");
         sensorLluvia      = conexionRMI("SensorLluviaRMI");
 
@@ -94,7 +105,7 @@ public class Consola {
                 handleSensorCommand(sensorTemperatura, "Temperatura", args);
                 break;
             case "humedad":
-                handleSensorCommand(sensorHumedad, "Humedad", args);
+                handleHumedadCommand(args);
                 break;
             case "radiacion":
                 handleSensorCommand(sensorRadiacion, "Radiacion", args);
@@ -115,7 +126,73 @@ public class Consola {
     }
 
     /**
-     * Gestiona los comandos para sensores genéricos (temperatura, humedad, radiación).
+     * Gestiona los comandos para los sensores de humedad, que requieren un ID.
+     *
+     * @param args Los argumentos del comando, ej: ["humedad", "1", "set", "60.5"]
+     */
+    private void handleHumedadCommand(String[] args) {
+        if (args.length < 3) {
+            System.out.println("Comando 'humedad' incompleto. Uso: humedad <id> <set|mode> [valor]");
+            return;
+        }
+
+        int id;
+        try {
+            id = Integer.parseInt(args[1]);
+        } catch (NumberFormatException e) {
+            System.err.println("El ID del sensor de humedad debe ser un número. '" + args[1] + "' no es válido.");
+            return;
+        }
+
+        ISensorRMI sensor = sensoresHumedad.get(id);
+        if (sensor == null) {
+            System.err.println("El sensor de humedad con ID " + id + " no está conectado o no existe.");
+            return;
+        }
+
+        String sensorName = "Humedad[" + id + "]";
+        String operation = args[2].toLowerCase();
+
+        try {
+            switch (operation) {
+                case "set":
+                    if (args.length < 4) {
+                        System.out.println("Falta el valor para 'set'. Ejemplo: humedad " + id + " set 50.0");
+                        return;
+                    }
+                    double value = Double.parseDouble(args[3]);
+                    sensor.setValor(value);
+                    System.out.println(sensorName + " -> valor establecido a " + value);
+                    break;
+                case "mode":
+                    if (args.length < 4) {
+                        System.out.println("Falta el modo para 'mode'. Use 'auto' o 'manual'.");
+                        return;
+                    }
+                    String mode = args[3].toLowerCase();
+                    if (mode.equals("auto")) {
+                        sensor.setAuto(true);
+                        System.out.println(sensorName + " -> modo establecido a AUTOMÁTICO");
+                    } else if (mode.equals("manual")) {
+                        sensor.setAuto(false);
+                        System.out.println(sensorName + " -> modo establecido a MANUAL");
+                    } else {
+                        System.out.println("Modo no reconocido: '" + mode + "'. Use 'auto' o 'manual'.");
+                    }
+                    break;
+                default:
+                    System.out.println("Operación no reconocida para " + sensorName + ": '" + operation + "'. Use 'set' o 'mode'.");
+                    break;
+            }
+        } catch (RemoteException e) {
+            System.err.println("Error de RMI al comunicarse con " + sensorName + ": " + e.getMessage());
+        } catch (NumberFormatException e) {
+            System.err.println("El valor proporcionado '" + args[3] + "' no es un número válido.");
+        }
+    }
+
+    /**
+     * Gestiona los comandos para sensores genéricos (temperatura, radiación).
      *
      * @param sensor La instancia del sensor RMI a controlar.
      * @param sensorName El nombre del sensor para los mensajes de log.
@@ -207,7 +284,8 @@ public class Consola {
     private void printHelp() {
         System.out.println("\n--- Ayuda de Comandos ---");
         System.out.println("Uso general: <sensor> <operacion> [valor]");
-        System.out.println("Sensores disponibles: temperatura, humedad, radiacion, lluvia");
+        System.out.println("  Para sensor de humedad: humedad <id> <operacion> [valor]");
+        System.out.println("Sensores disponibles: temperatura, humedad (IDs 0-4), radiacion, lluvia");
         System.out.println("\nOperaciones:");
         System.out.println("  set <valor>        - Establece un valor manual para el sensor.");
         System.out.println("                       Para 'lluvia', <valor> debe ser 0 (seco) o 1 (lloviendo).");
@@ -217,7 +295,8 @@ public class Consola {
         System.out.println("  exit               - Cierra la consola.");
         System.out.println("\nEjemplos:");
         System.out.println("  > temperatura set 25.5");
-        System.out.println("  > humedad mode auto");
+        System.out.println("  > humedad 1 mode auto");
+        System.out.println("  > humedad 2 set 65.0");
         System.out.println("  > lluvia set 1");
         System.out.println("------------------------\n");
     }
